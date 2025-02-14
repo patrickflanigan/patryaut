@@ -31,14 +31,15 @@ float Current_Distance_to_Waypoint = 100;
 
 float Hardcoded_Target_Latitude[4] = {32.82922, 32.82893, 32.82877, 32.82867};
 float Hardcoded_Target_Longitude[4] = {-117.22954, -117.22950, -117.23007, -117.22963}; // This is an array of 5 waypoint Longitudes, update the '5' depending on the number of waypoints
-float Target_Latitude[4] = {32.82922, 32.82893, 32.82877, 32.82867};
-float Target_Longitude[4] = {-117.22954, -117.22950, -117.23007, -117.22963};
+float Target_Latitude[10] = {0,0,0,0,0,0,0,0,0,0};
+float Target_Longitude[10] = {0,0,0,0,0,0,0,0,0,0};
 int16_t Target_Heading = 0; // This is the current target heading for the boat
 float Normalized_Heading_Error = 0;
 int Waypoint_Index = 0; // This increments each time a new waypoint is achieved.
+int Saved_Waypoint_Index = 0;
 
-float Average_Speed = .3; // This is the average power to the boat. (.3 = 30%)
-float Turn_Gain = .5; // This is the turn gain. Be careful.
+float Average_Speed = .8; // This is the average power to the boat. (.3 = 30%)
+float Turn_Gain = 1.2; // This is the turn gain. Be careful.
 float Waypoint_Radius = 6; // Unclear how this maps yet.
 int Max_Forward = 100;
 int Max_Reverse = -100;
@@ -55,6 +56,7 @@ float Right_Motor_Effort = 0;
 void UpdatePositionandHeading();
 float getHeadingToWPT(float current_lat, float current_long, float way_lat, float way_long);
 float ComputeNormalizedHeadingError(float Current_Heading, float Desired_Heading);
+bool CheckControlMode();
 
 
 
@@ -64,6 +66,7 @@ TinyGPSPlus gps3;
 TinyGPSPlus gps2;
 CRSF crsf;  // Correct instantiation—no parentheses!
 
+Result_t result = crsf.GetCrsfPacket();
 
 
 void setup() {
@@ -106,8 +109,6 @@ void setup() {
 
   crsf.Begin();
   Serial.println("CRSF Receiver Initialized");
-
-
   Serial.println(F("System Initialization Complete"));
 }
 
@@ -116,22 +117,18 @@ void loop() {
 
     case INITIAL:
     // Initial Actions Here
-    // Boat_State = GETTING_POS_HEADING;
-    // Previous_State = INITIAL;
-
-    Result_t result = crsf.GetCrsfPacket();
-    Serial.print("Got Packet!");
+    result = crsf.GetCrsfPacket();
   
     if (result == PACKET_READY) {
       crsf.UpdateChannels();
-      Serial.print("Channels: ");
-      for (uint8_t i = 0; i < CRSF_MAX_CHANNEL; i++) {
-        Serial.print(crsf.channels[i]);
-        Serial.print(" ");
-      }
-      Serial.println();
+      // Serial.print("Channels: ");
+      // for (uint8_t i = 0; i < CRSF_MAX_CHANNEL; i++) {
+        // Serial.print(crsf.channels[i]);
+        // Serial.print(" ");
+      // }
+      // Serial.println();
+      // Serial.println(crsf.channels[1]);
       if (crsf.channels[1] < 1600){
-        Serial.print("HERE");
         Boat_State = REMOTE_CONTROL;
         Previous_State = INITIAL;
         break;
@@ -144,11 +141,13 @@ void loop() {
     }
 
     case REMOTE_CONTROL:
-    Serial.print("In Remote Control Mode!");
+    UpdatePositionandHeading();
+    //Serial.print("In Remote Control");
+    result = crsf.GetCrsfPacket();
     if (result == PACKET_READY) {
       crsf.UpdateChannels();
-      Left_Motor_Effort = map(crsf.channels[2], 170, 1850, -30, 30) + map(crsf.channels[0], 170, 1850, -30, 30);
-      Right_Motor_Effort = map(crsf.channels[2], 170, 1850, -30, 30) - map(crsf.channels[0], 170, 1850, -30, 30);
+      Left_Motor_Effort = map(crsf.channels[2], 170, 1850, -100, 100) + map(crsf.channels[0], 170, 1850, -100, 100);
+      Right_Motor_Effort = map(crsf.channels[2], 170, 1850, -100, 100) - map(crsf.channels[0], 170, 1850, -100, 100);
       // Map -100..100 to 1000..2000 us
       //   For better readability, do it step by step:
       int LeftpulseMicroseconds = map(Left_Motor_Effort, -100, 100, 1000, 2000);
@@ -169,29 +168,29 @@ void loop() {
       }
 
       // Check if the button is pressed (change in state)
-    //   if (buttonState == HIGH && lastButtonState == LOW) {
-    //     // If the button is pressed, add a value to the array
-    //     if (index < 10) {
-    //       array[index] = random(1, 100);  // Fill with random values between 1 and 100
-    //       Serial.print("Added: ");
-    //       Serial.println(array[index]);
-    //       index++;  // Increment the index to fill the next array position
-    //     }
-    //   }
+      if (crsf.channels[8] > 1500){
+        Serial.print("Saving Waypoint to Index!!!");
+        Target_Latitude[Saved_Waypoint_Index] = Current_Latitude;
+        Target_Longitude[Saved_Waypoint_Index] = Current_Longitude;
+        Saved_Waypoint_Index++;
+        delay(5000);
+        }
     }
 
     break;
 
 
     case GETTING_POS_HEADING:
-    Serial.print("In GETTING POS Mode");
+    CheckControlMode();
+    //Serial.print("In GETTING POS Mode");
     UpdatePositionandHeading();
     while(Current_Latitude == 0.00){
       UpdatePositionandHeading();
       delay(15);
     }
-    Serial.println("updated Position and heading!");
-    // Serial.println(Current_Latitude, 6);
+    //Serial.println("updated Position and heading!");
+    Serial.println(Current_Heading);
+    Serial.println(Current_Latitude, 6);
     Boat_State = COMPUTING_TRAJECTORY;
     Previous_State = GETTING_POS_HEADING;
     delay(15);
@@ -199,6 +198,7 @@ void loop() {
 
 
     case COMPUTING_TRAJECTORY:
+    CheckControlMode();
     Target_Heading = getHeadingToWPT(Current_Latitude, Current_Longitude, Target_Latitude[Waypoint_Index], Target_Longitude[Waypoint_Index]);
     // Serial.print("Target Heading : ");
     // Serial.print(Target_Heading);
@@ -208,6 +208,7 @@ void loop() {
     break;
 
     case FOLLOWING_HEADING:
+    CheckControlMode();
     UpdatePositionandHeading();
     Normalized_Heading_Error = ComputeNormalizedHeadingError(Current_Heading, Target_Heading);
     // Serial.print(" Normalized Heading Error : ");
@@ -285,6 +286,7 @@ void loop() {
 
 
 void UpdatePositionandHeading(){
+  CheckControlMode();
   //Serial.println("Updating Position and Heading!");
     
   // Update the compass data -------------------------------------
@@ -374,4 +376,14 @@ float ComputeNormalizedHeadingError(float Current_Heading, float Desired_Heading
 
 
 
+bool CheckControlMode(){ // if true, return to manual mode!
+  result = crsf.GetCrsfPacket();
+  
+  if (result == PACKET_READY) {
+    crsf.UpdateChannels();
+    if (crsf.channels[1] < 1600){
+      Boat_State = REMOTE_CONTROL;
+    }
+}
+}
 

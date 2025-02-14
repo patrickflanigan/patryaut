@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../../../Arduino/PatRyAut"
+		},
+		{
+			"name": "PatRyAutPlatform",
+			"path": "."
+		}
+	],
+	"settings": {}
+}
